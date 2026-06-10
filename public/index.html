@@ -292,18 +292,29 @@ function renderNav(){
   $('#nav').style.display='flex';
   const src = tab==='results' ? state.results : myPreds;
   $('#nav').innerHTML=Object.keys(GROUPS).map(g=>{
-    const done=matchesOf(g).every(m=>src[m[0]]);
-    return `<button class="chip ${g===activeG?'active':''} ${done?'done':''}" data-g="${g}">${g}</button>`;
+    const ms=matchesOf(g);
+    const done=ms.every(m=>src[m[0]]&&src[m[0]][0]!==''&&src[m[0]][1]!=='');
+    // En modo admin muestra cuántos faltan
+    let badge='';
+    if(tab==='results'&&adminPin){
+      const cap=ms.filter(m=>src[m[0]]&&src[m[0]][0]!==''&&src[m[0]][0]!==undefined).length;
+      if(cap>0&&cap<ms.length) badge=`<span style="font-size:9px;margin-left:3px;color:var(--gold)">${cap}/${ms.length}</span>`;
+    }
+    return `<button class="chip ${g===activeG?'active':''} ${done?'done':''}" data-g="${g}">${g}${badge}</button>`;
   }).join('');
   $('#nav').querySelectorAll('.chip').forEach(b=>b.onclick=()=>{activeG=b.dataset.g;render()});
 }
 
-function matchCard(m, src, editable, showPts){
+function matchCard(m, src, editable){
   const [id,,,d,t,h,a,v]=m;
   const s=src[id]||['',''];
-  const locked = tab==='preds' && state.results[id];
+  const lockedByTime = !!state.locked[id];
+  const hasResult = !!state.results[id];
+  const locked = tab==='preds' && (hasResult || lockedByTime);
   const res = state.results[id];
   let foot='';
+
+  // Footer para jugadores: muestra resultado y puntos
   if(tab==='preds' && res){
     const p=src[id];
     let badge='<span class="pt-miss">Sin pronóstico · 0 pts</span>';
@@ -314,8 +325,21 @@ function matchCard(m, src, editable, showPts){
     }
     foot=`<div class="match-foot"><span>Oficial: <b>${res[0]} – ${res[1]}</b></span>${badge}</div>`;
   }
+
+  // Footer para admin: estado del resultado
+  if(tab==='results' && editable){
+    const completo = s[0]!==''&&s[0]!==undefined&&s[1]!==''&&s[1]!==undefined;
+    const statusIcon = completo
+      ? `<span style="color:var(--green);font-size:11px">✓ Capturado</span>`
+      : `<span style="color:var(--muted);font-size:11px">⏳ Pendiente</span>`;
+    foot=`<div class="match-foot"><span style="font-size:11px;color:var(--muted)">${lockedByTime?'🔒 Partido iniciado':'📋 Abierto'}</span>${statusIcon}</div>`;
+  }
+
   const dis = (!editable||locked)?'disabled':'';
-  return `<div class="match ${locked?'locked':''}">
+  const cardStyle = tab==='results' && editable
+    ? (s[0]!==''&&s[0]!==undefined&&s[1]!==''&&s[1]!==undefined ? 'border-color:rgba(55,201,120,.4)' : '')
+    : '';
+  return `<div class="match ${locked?'locked':''}" style="${cardStyle}">
     <div class="match-meta"><span>${d} · ${t} h</span><span>${v}</span></div>
     <div class="match-row">
       <div class="team"><span class="fl">${TEAMS[h][1]}</span><span class="nm">${TEAMS[h][0]}</span></div>
@@ -328,9 +352,30 @@ function matchCard(m, src, editable, showPts){
     </div>${foot}</div>`;
 }
 
+function adminCounterHTML(){
+  const total = MATCHES.length;
+  const capturados = Object.keys(state.results).length;
+  const pendientes = total - capturados;
+  const pct = Math.round(capturados/total*100);
+  return `<div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--muted)">Resultados capturados</span>
+      <span style="font-family:'Archivo Black',sans-serif;font-size:18px">${capturados}<span style="font-size:12px;color:var(--muted);font-weight:400"> / ${total}</span></span>
+    </div>
+    <div style="height:6px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-bottom:8px">
+      <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--green),#7EF0B0);border-radius:99px;transition:width .4s"></div>
+    </div>
+    <div style="display:flex;gap:14px;font-size:11px">
+      <span style="color:var(--green)">✓ ${capturados} capturados</span>
+      <span style="color:var(--muted)">⏳ ${pendientes} pendientes</span>
+    </div>
+  </div>`;
+}
+
 function renderGroupView(src, editable, noteHTML, saveLabel){
   const g=activeG, ms=matchesOf(g);
-  let html=noteHTML+`<div class="group-head"><div class="big">${g}</div><h2>GRUPO <em>${g}</em></h2></div>`;
+  const adminCounter = (tab==='results'&&editable) ? adminCounterHTML() : '';
+  let html=adminCounter+noteHTML+`<div class="group-head"><div class="big">${g}</div><h2>GRUPO <em>${g}</em></h2></div>`;
   [1,2,3].forEach(j=>{
     html+=`<div class="jornada-label">${J[j]}</div>`;
     ms.filter(m=>m[2]===j).forEach(m=>html+=matchCard(m,src,editable));
@@ -415,10 +460,22 @@ async function savePreds(){
 }
 async function saveResults(){
   try{
+    // Validar: detectar partidos con solo un gol capturado
+    const incompletos = MATCHES.filter(m=>{
+      const s=state.results[m[0]];
+      if(!s) return false;
+      const t0=s[0]!==''&&s[0]!==undefined, t1=s[1]!==''&&s[1]!==undefined;
+      return t0 !== t1; // uno sí y el otro no
+    });
+    if(incompletos.length){
+      toast(`⚠️ ${incompletos.length} partido(s) con marcador incompleto — revisa`);
+      return;
+    }
     const results=packComplete(state.results,MATCHES.map(m=>m[0]));
     await api('/api/results',{adminPin,results});
     await refresh();render();
-    toast('Resultados oficiales guardados ✓');
+    const n=Object.keys(results).length;
+    toast(`✓ ${n} resultados guardados`);
   }catch(e){toast(e.message)}
 }
 
