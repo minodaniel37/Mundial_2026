@@ -241,7 +241,7 @@ const MATCHES=[
  ['M70','J',3,'Sáb 27 jun','20:00','JOR','ARG','AT&T Stadium · Dallas'],
  ['M69','J',3,'Sáb 27 jun','20:00','ALG','AUT','Arrowhead · Kansas City']];
 
-const PTS_EXACT = 3, PTS_HIT = 1;
+const PTS_EXACT = 2, PTS_HIT = 1;
 
 /* ================= ESTADO ================= */
 let session = null;            // {name, pin}
@@ -308,9 +308,9 @@ function matchCard(m, src, editable, showPts){
     const p=src[id];
     let badge='<span class="pt-miss">Sin pronóstico · 0 pts</span>';
     if(p){
-      if(p[0]===res[0]&&p[1]===res[1]) badge=`<span class="pt-exact">¡Exacto! +${PTS_EXACT} pts</span>`;
-      else if(outcome(p)===outcome(res)) badge=`<span class="pt-hit">Atinaste al resultado +${PTS_HIT} pt</span>`;
-      else badge='<span class="pt-miss">Fallaste · 0 pts</span>';
+      if(p[0]===res[0]&&p[1]===res[1]) badge=`<span class="pt-exact">⚽ ¡Marcador exacto! +${PTS_EXACT} pts</span>`;
+      else if(outcome(p)===outcome(res)) badge=`<span class="pt-hit">✓ Atinaste G/E/P +${PTS_HIT} pt</span>`;
+      else badge='<span class="pt-miss">✗ Fallaste · 0 pts</span>';
     }
     foot=`<div class="match-foot"><span>Oficial: <b>${res[0]} – ${res[1]}</b></span>${badge}</div>`;
   }
@@ -346,17 +346,26 @@ function renderRank(){
   const ranked=state.players.map(p=>({name:p.name,...pointsFor(p.preds)}))
     .sort((a,b)=>b.total-a.total||b.exact-a.exact||a.name.localeCompare(b.name));
   const played=Object.keys(state.results).length;
-  let html=`<p class="note">Puntos: <b>marcador exacto ${PTS_EXACT} pts</b> · <b>atinar ganador o empate ${PTS_HIT} pt</b>. Partidos con resultado oficial: <b>${played} / 72</b>.</p>`;
+  let html=`<p class="note">🏆 <b>Marcador exacto = ${PTS_EXACT} pts</b> · <b>Atinar G/E/P = ${PTS_HIT} pt</b> · Máx. 144 pts. Partidos calificados: <b>${played} / 72</b>.</p>`;
   if(!ranked.length) html+=`<p class="note">Todavía no hay jugadores registrados. ¡Comparte el link con tus amigos!</p>`;
   ranked.forEach((r,i)=>{
-    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+    const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`;
+    const maxPts = played * PTS_EXACT;
+    const pct = maxPts > 0 ? Math.round(r.total/maxPts*100) : 0;
     html+=`<div class="rank-card ${i===0?'top1':''} ${session&&r.name===session.name?'me':''}">
       <div class="pos">${medal}</div>
-      <div class="info"><div class="nm">${r.name}</div>
-      <div class="det">${r.exact} exactos · ${r.hit} atinados · ${r.played} pronósticos calificados</div></div>
-      <div class="tot">${r.total}</div></div>`;
+      <div class="info">
+        <div class="nm">${r.name}${session&&r.name===session.name?' <span style="font-size:10px;color:var(--gold)">· tú</span>':''}</div>
+        <div class="det">⚽ ${r.exact} exactos · ✓ ${r.hit} G/E/P · ${r.played} calificados</div>
+        <div style="margin-top:6px;height:4px;background:var(--panel2);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),#F5D78A);border-radius:99px;transition:width .4s"></div>
+        </div>
+      </div>
+      <div class="tot">${r.total}<span style="font-size:11px;color:var(--muted);font-family:'Archivo',sans-serif;font-weight:400"> pts</span></div>
+    </div>`;
   });
-  html+=`<div class="savebar"><button class="btn ghost" id="btnRefresh">Actualizar ranking</button></div>`;
+  html+=`<div class="savebar"><button class="btn ghost" id="btnRefresh">↻ Actualizar ranking</button></div>
+  <p style="text-align:center;font-size:10.5px;color:var(--muted);margin-top:8px">Se actualiza automáticamente cada 30 seg</p>`;
   $('#main').innerHTML=html;
   $('#btnRefresh').onclick=async()=>{await refresh();render();toast('Ranking actualizado')};
 }
@@ -453,7 +462,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{tab=t.dataset.t;rend
     }catch(e){session=null;localStorage.removeItem('quiniela-session')}
   }
   render();
-  setInterval(async()=>{if(tab!=='preds'){await refresh();render()}},45000);
+  setInterval(async()=>{await refresh();if(tab==='rank')render();},30000);
 })();
 </script>
 </body>
